@@ -24,7 +24,7 @@ void icmp_handle_packet(net_address_t* source, uint8_t* body, size_t body_len) {
         memcpy(target.mac, source->mac, 6);
         target.ip = source->ip;        
 
-        ipv4_send_packet(&target, IPv4_PROTO_ICMP, frame, body_len);
+        ipv4_send_packet(&target, IPv4_PROTO_ICMP, (uint8_t*)frame, body_len);
         break;
     }
 

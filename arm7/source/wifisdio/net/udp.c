@@ -89,7 +89,7 @@ void udp_send_packet(net_address_t* target, uint16_t port, uint8_t* body, size_t
 
     memcpy(frame->body, body, len);
 
-    ipv4_send_packet(target, IPv4_PROTO_UDP, frame, total_len);
+    ipv4_send_packet(target, IPv4_PROTO_UDP, (uint8_t*)frame, total_len);
 
     net_free(frame);
 }

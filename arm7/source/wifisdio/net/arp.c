@@ -82,7 +82,7 @@ void arp_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
         net_address_t target = {0};
         memcpy(target.mac, arp_data->dest_mac, 6);
 
-        net_send_packet(PROTO_ARP, &target, req, sizeof(arp_request_t) + sizeof(arp_ipv4_t));
+        net_send_packet(PROTO_ARP, &target, (uint8_t*)req, sizeof(arp_request_t) + sizeof(arp_ipv4_t));
         break;
     }
     case ARP_OP_REPLY: break; // Just ignore replies here, already handled above
@@ -118,7 +118,7 @@ void arp_request(uint32_t ip) {
     net_address_t target = {0};
     memcpy(target.mac, broadcast_mac, 6);
     
-    net_send_packet(PROTO_ARP, &target, &req, sizeof(request_t));
+    net_send_packet(PROTO_ARP, &target, (uint8_t*)&req, sizeof(request_t));
 }
 
 uint8_t* arp_lookup(uint32_t ip) {

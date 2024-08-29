@@ -100,7 +100,7 @@ void ipv4_send_packet(net_address_t* target, uint8_t proto, uint8_t* data, size_
         memcpy(target->mac, mac, 6);
     }
 
-    net_send_packet(PROTO_IPv4, target, frame, total_len);
+    net_send_packet(PROTO_IPv4, target, (uint8_t*)frame, total_len);
 
     net_free(frame);
 }
