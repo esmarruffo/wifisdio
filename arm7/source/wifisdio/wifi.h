@@ -25,6 +25,8 @@ typedef struct {
     uint32_t subnet;
     uint8_t enable;
     uint8_t wepmode;
+    uint8_t wpa_type;    // WPA type: 0=None/WEP, 4=WPA-TKIP, 5=WPA2-TKIP, 6=WPA-AES, 7=WPA2-AES
+    uint8_t psk[0x20];   // 32-byte Precomputed PSK
 } __attribute__((packed)) WifiAp_t;
 
 typedef struct {

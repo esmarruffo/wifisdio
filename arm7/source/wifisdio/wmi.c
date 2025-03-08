@@ -318,6 +318,14 @@ void sdio_poll_mbox(uint8_t mbox) {
                     break;
                 }
                 case WMI_BSSINFO_EVENT: {
+                    // TODO: obviously remove this hardcoded value and let it scan
+                    // cut to the chase for now
+                    extern bool ap_found;
+                    extern uint8_t ap_index;
+                    ap_found = true;
+                    ap_index = 4;
+                    break;
+
                     wmi_bssinfo_event_t* info = (wmi_bssinfo_event_t*)params;
                     WifiBeacon_t beacon = {0};
 
@@ -825,7 +833,10 @@ void sdio_wmi_connect(void) {
     extern uint16_t current_channel;
 
     requested_channel = access_points[ap_index].channel;
-    current_channel = access_points[ap_index].channel;
+    // current_channel = access_points[ap_index].channel;
+    // TODO: again, obviously fix this hardcoded value -
+    // once I figure out what's wrong with the channel setting
+    current_channel = 4;
 
     channel_to_mhz(current_channel);
 
@@ -833,8 +844,6 @@ void sdio_wmi_connect(void) {
     channels[0] = channel_to_mhz(current_channel);
 
     sdio_wmi_set_channel_params_cmd(0, 0, PHY_MODE_11G, 1, channels);
-
-    // TODO(thom_tl): Don't assume the network is open
 
     sdio_wmi_set_bitrate_cmd(0, 0xFF, 0, 0);
     sdio_wmi_set_framerates_cmd(0, 1, 0xA4, 0xFFF7);
@@ -876,13 +885,54 @@ void sdio_wmi_connect(void) {
     uint8_t dot11_auth_mode = AUTH_OPEN;
     uint8_t auth_mode = WMI_NONE_AUTH;
     uint8_t crypt_type = CRYPT_NONE;
+    uint8_t key_length = 0;
 
-    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WPA)
-        panic("sdio_wmi_connect(): WPA is as of yet unsupported\n");
-
-
-    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WEP) {
-        print("sdio_wmi_connect(): WEP Support is untested!!\n");
+    // Handle WPA/WPA2 connections
+    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WPA) {
+        print("Attempting WPA/WPA2 connection (type %d)\n", access_points[ap_index].wpa_type);
+        
+        // For WPA/WPA2, we use open auth followed by EAPOL
+        dot11_auth_mode = AUTH_OPEN;
+        
+        // Handle different WPA types
+        switch(access_points[ap_index].wpa_type) {
+            case 4: // WPA-TKIP
+                auth_mode = WMI_WPA_PSK_AUTH;
+                crypt_type = CRYPT_TKIP;
+                key_length = 32; // TKIP key length
+                break;
+                
+            case 5: // WPA2-TKIP
+                auth_mode = WMI_WPA2_PSK_AUTH;
+                crypt_type = CRYPT_TKIP;
+                key_length = 32; // TKIP key length
+                break;
+                
+            case 6: // WPA-AES
+                auth_mode = WMI_WPA_PSK_AUTH;
+                crypt_type = CRYPT_AES;
+                key_length = 16; // AES key length
+                break;
+                
+            case 7: // WPA2-AES
+                auth_mode = WMI_WPA2_PSK_AUTH;
+                crypt_type = CRYPT_AES;
+                key_length = 16; // AES key length
+                break;
+                
+            default:
+                panic("Unknown WPA type: %d\n", access_points[ap_index].wpa_type);
+                break;
+        }
+        
+        // Configure cipher key with PSK
+        sdio_wmi_add_cipher_key_cmd(0, 0, crypt_type, KEY_USAGE_PAIRWISE | KEY_USAGE_TX,
+                                  KEY_OP_INIT_TSC | KEY_OP_INIT_RSC, key_length,
+                                  access_points[ap_index].psk);
+    }
+    // Handle WEP connections
+    else if(access_points[ap_index].flags & sgWifiAp_FLAGS_WEP) {
+        print("Attempting WEP connection\n");
         for(size_t i = 0; i < 4; i++) {
             uint8_t usage = (i == 0) ? (KEY_USAGE_GROUP | KEY_USAGE_TX) : (KEY_USAGE_GROUP);
             uint8_t wepmode = access_points[ap_index].wepmode;
@@ -907,15 +957,22 @@ void sdio_wmi_connect(void) {
         auth_mode = WMI_NONE_AUTH;
         crypt_type = CRYPT_WEP;
     }
+    // Handle open connections
+    else {
+        print("Attempting open connection\n");
+        dot11_auth_mode = AUTH_OPEN;
+        auth_mode = WMI_NONE_AUTH;
+        crypt_type = CRYPT_NONE;
+    }
 
     wmi_connect_cmd_t connect = {0};
     connect.network_type = NETWORK_INFRA;
     connect.dot11_auth_mode = dot11_auth_mode;
     connect.auth_mode = auth_mode;
     connect.pairwise_crypto_type = crypt_type;
-    connect.pairwise_cypto_len = 0;
+    connect.pairwise_cypto_len = key_length;
     connect.group_crypto_type = crypt_type;
-    connect.group_crypto_len = 0;
+    connect.group_crypto_len = key_length;
     connect.ssid_length = access_points[ap_index].ssid_len;
     memcpy(connect.ssid, access_points[ap_index].ssid, access_points[ap_index].ssid_len);
 
