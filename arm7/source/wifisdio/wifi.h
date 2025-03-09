@@ -68,3 +68,7 @@ static inline uint16_t htons(uint16_t v) {
     
     return ret;
 }
+
+static inline uint16_t ntohs(uint16_t v) {
+    return htons(v);
+}

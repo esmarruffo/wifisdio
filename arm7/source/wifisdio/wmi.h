@@ -54,8 +54,6 @@ typedef struct {
 
 #define MBOX_RECV_FLAGS_HAS_ACK 2
 
-#define PROTOCOL_ETHER_EAPOL 0x8e88 // TODO: Move this somewhere else
-
 #define WMI_CONNECT_CMD 0x1
 #define WMI_SYNCHRONIZE_CMD 0x4
 #define WMI_CREATE_PSTREAM_CMD 0x5
