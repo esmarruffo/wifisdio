@@ -2,10 +2,8 @@
 #include "wmi.h"
 #include "wifi.h"
 
-
 #include "net/base.h"
 #include "net/net_alloc.h"
-#include "net/eapol.h"
 
 #include "sdio.h"
 
@@ -24,12 +22,12 @@ uint8_t ath_lookahead_flag = 0;
 uint32_t recent_heartbeat = 0;
 uint32_t** curr_wpa_tx_callback_list_ptr = NULL;
 
-TWL_CODE void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
+void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
     sdio_send_mbox_block(mbox, (uint8_t*)cmd);
     ath_cmd_ack_pending = (cmd->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? (1) : (0);
 }
 
-TWL_CODE void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
+void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
     do {
         sdio_poll_mbox(mbox);
     } while (ath_cmd_ack_pending != 0);
@@ -39,7 +37,7 @@ TWL_CODE void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
 }
 
 
-TWL_CODE void sdio_heartbeat(uint8_t mbox) {
+void sdio_heartbeat(uint8_t mbox) {
     extern uint32_t arm7_count_60hz;
 
     uint32_t ticks = arm7_count_60hz - recent_heartbeat;
@@ -64,7 +62,7 @@ TWL_CODE void sdio_heartbeat(uint8_t mbox) {
     sdio_send_wmi_cmd_without_poll(mbox, &cmd.header);
 }
 
-TWL_CODE void sdio_tx_callback(void) {
+void sdio_tx_callback(void) {
     uint32_t* item = *curr_wpa_tx_callback_list_ptr;
     if(!item)
         return;
@@ -84,19 +82,11 @@ TWL_CODE void sdio_tx_callback(void) {
     *curr_wpa_tx_callback_list_ptr = 0;
 }
 
-TWL_CODE void sdio_Wifi_Intr_RxEapolEnd(void) {
-    wmi_mbox_recv_data_header_t* packet = (wmi_mbox_recv_data_header_t*)sdio_xfer_buf;
-    uint16_t len = packet->len - 0x10;
-    
-    // Extract source address
-    net_address_t source;
-    memcpy(source.mac, packet->source_mac, 6);
-    
-    // Skip LLC/SNAP header (8 bytes)
-    eapol_handle_packet(&source, packet->body + 8, len - 8);
+void sdio_Wifi_Intr_RxEapolEnd(void) {
+    panic("sdio_Wifi_Intr_RxEapolEnd()\n");
 }
 
-TWL_CODE void sdio_Wifi_Intr_RxEnd(void) {
+void sdio_Wifi_Intr_RxEnd(void) {
     wmi_mbox_recv_data_header_t* packet = (wmi_mbox_recv_data_header_t*)sdio_xfer_buf;
 
     uint16_t len = packet->len - 0x10;
@@ -114,21 +104,21 @@ TWL_CODE void sdio_Wifi_Intr_RxEnd(void) {
 
 void* tx_stack[10] = {NULL};
 uint8_t tx_stack_ptr = 0;
-TWL_CODE void* tx_stack_pop(void) {
+void* tx_stack_pop(void) {
     if(tx_stack_ptr > 0)
         return tx_stack[--tx_stack_ptr];
     else
         return NULL; // No packet on stack
 }
 
-TWL_CODE void tx_stack_push(void* packet) {
+void tx_stack_push(void* packet) {
     if(tx_stack_ptr == 9)
         panic("TX Stack full\n");
 
     tx_stack[tx_stack_ptr++] = packet;
 }
 
-TWL_CODE void sdio_Wifi_Intr_TxEnd(void) {
+void sdio_Wifi_Intr_TxEnd(void) {
     if(ath_data_ack_pending != 0)
         return;
 
@@ -140,7 +130,7 @@ TWL_CODE void sdio_Wifi_Intr_TxEnd(void) {
     net_free(packet);
 }
 
-TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
+void sdio_poll_mbox(uint8_t mbox) {
     int old_ime = enterCriticalSection();
 
     const uint8_t max_polls_per_call = 10;
@@ -328,14 +318,6 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
                     break;
                 }
                 case WMI_BSSINFO_EVENT: {
-                    // TODO: obviously remove this hardcoded value and let it scan
-                    // cut to the chase for now
-                    extern bool ap_found;
-                    extern uint8_t ap_index;
-                    ap_found = true;
-                    ap_index = 3;   // HARDCODED
-                    break;
-
                     wmi_bssinfo_event_t* info = (wmi_bssinfo_event_t*)params;
                     WifiBeacon_t beacon = {0};
 
@@ -414,8 +396,8 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
                             ap_index = i;
                             break;
                         }
-
                     }
+
                     break;
                 }
                 case WMI_REGDOMAIN_EVENT: {
@@ -452,10 +434,6 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
                     }
                     break;
                 }
-                case WMI_ERROR_REPORT_EVENT: {
-                    print("WMI_ERROR_REPORT_EVENT\n");
-                    break;
-                }
                 default: {
                     //leaveCriticalSection(old_ime);
                     print("Unknown WMI Event 0x%x\n", event);
@@ -463,8 +441,7 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
             }
         } else if(header->type == MBOX_RECV_TYPE_DATA_PACKET || header->type == 5) { // Occurs on 02acc2?
             uint16_t* data = (uint16_t*)sdio_xfer_buf;
-            if(data[0xE] == PROTO_ETHER_EAPOL) {
-            // if(data[0xE] == 1) {
+            if(data[0xE] == PROTOCOL_ETHER_EAPOL) {
                 leaveCriticalSection(old_ime);
                 sdio_Wifi_Intr_RxEapolEnd();
             } else {
@@ -824,7 +801,7 @@ void sdio_wmi_scan_channel(void) {
     } while(ath_await_scan_complete != 0);
 }
 
-TWL_CODE void sdio_wmi_connect(void) {
+void sdio_wmi_connect(void) {
     sdio_wmi_set_bss_filter_cmd(0, BSS_FILTER_CURRENT_BSS, 0);
 
     wmi_set_scan_params_cmd_t cmd = {0};
@@ -848,19 +825,16 @@ TWL_CODE void sdio_wmi_connect(void) {
     extern uint16_t current_channel;
 
     requested_channel = access_points[ap_index].channel;
-    // current_channel = access_points[ap_index].channel;
-    // TODO: again, obviously fix this hardcoded value -
-    // once I figure out what's wrong with the channel setting
-    current_channel = 4;
+    current_channel = access_points[ap_index].channel;
 
     channel_to_mhz(current_channel);
 
     uint16_t channels[1] = {0};
-    // TODO: fix channel setting to I don't have to hardcode it
-    current_channel = 4;    // HARDCODED
     channels[0] = channel_to_mhz(current_channel);
 
     sdio_wmi_set_channel_params_cmd(0, 0, PHY_MODE_11G, 1, channels);
+
+    // TODO(thom_tl): Don't assume the network is open
 
     sdio_wmi_set_bitrate_cmd(0, 0xFF, 0, 0);
     sdio_wmi_set_framerates_cmd(0, 1, 0xA4, 0xFFF7);
@@ -902,47 +876,13 @@ TWL_CODE void sdio_wmi_connect(void) {
     uint8_t dot11_auth_mode = AUTH_OPEN;
     uint8_t auth_mode = WMI_NONE_AUTH;
     uint8_t crypt_type = CRYPT_NONE;
-    uint8_t key_length = 0;
 
-    // Handle WPA/WPA2 connections
-    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WPA) {
-        print("Attempting WPA/WPA2 connection (type %d)\n", access_points[ap_index].wpa_type);
-        
-        // Initialize EAPOL state
-        eapol_init();
-        
-        // For WPA/WPA2, we use open auth followed by EAPOL
-        dot11_auth_mode = AUTH_OPEN;
-        
-        // Focus only on WPA2-AES (type 7)
-        if(access_points[ap_index].wpa_type == 7) { // WPA2-AES
-            auth_mode = WMI_WPA2_PSK_AUTH;
-            crypt_type = CRYPT_AES;
-            key_length = 16; // AES key length
-        } else {
-            print("Warning: Only WPA2-AES is fully supported\n");
-            if(access_points[ap_index].wpa_type >= 4 && access_points[ap_index].wpa_type <= 6) {
-                // Try to connect anyway with the appropriate settings
-                if(access_points[ap_index].wpa_type == 4 || access_points[ap_index].wpa_type == 5) {
-                    // WPA/WPA2-TKIP
-                    auth_mode = (access_points[ap_index].wpa_type == 4) ? 
-                                WMI_WPA_PSK_AUTH : WMI_WPA2_PSK_AUTH;
-                    crypt_type = CRYPT_TKIP;
-                    key_length = 32; // TKIP key length
-                } else {
-                    // WPA-AES
-                    auth_mode = WMI_WPA_PSK_AUTH;
-                    crypt_type = CRYPT_AES;
-                    key_length = 16; // AES key length
-                }
-            } else {
-                panic("Unsupported WPA type: %d\n", access_points[ap_index].wpa_type);
-            }
-        }
-    }
-    // Handle WEP connections
-    else if(access_points[ap_index].flags & sgWifiAp_FLAGS_WEP) {
-        print("Attempting WEP connection\n");
+    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WPA)
+        panic("sdio_wmi_connect(): WPA is as of yet unsupported\n");
+
+
+    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WEP) {
+        print("sdio_wmi_connect(): WEP Support is untested!!\n");
         for(size_t i = 0; i < 4; i++) {
             uint8_t usage = (i == 0) ? (KEY_USAGE_GROUP | KEY_USAGE_TX) : (KEY_USAGE_GROUP);
             uint8_t wepmode = access_points[ap_index].wepmode;
@@ -967,24 +907,15 @@ TWL_CODE void sdio_wmi_connect(void) {
         auth_mode = WMI_NONE_AUTH;
         crypt_type = CRYPT_WEP;
     }
-    // Handle open connections
-    else {
-        print("Attempting open connection\n");
-        dot11_auth_mode = AUTH_OPEN;
-        auth_mode = WMI_NONE_AUTH;
-        crypt_type = CRYPT_NONE;
-    }
 
     wmi_connect_cmd_t connect = {0};
     connect.network_type = NETWORK_INFRA;
     connect.dot11_auth_mode = dot11_auth_mode;
     connect.auth_mode = auth_mode;
     connect.pairwise_crypto_type = crypt_type;
-    connect.pairwise_cypto_len = key_length;
-    connect.pairwise_cypto_len = key_length;
+    connect.pairwise_cypto_len = 0;
     connect.group_crypto_type = crypt_type;
-    connect.group_crypto_len = key_length;
-    connect.group_crypto_len = key_length;
+    connect.group_crypto_len = 0;
     connect.ssid_length = access_points[ap_index].ssid_len;
     memcpy(connect.ssid, access_points[ap_index].ssid, access_points[ap_index].ssid_len);
 

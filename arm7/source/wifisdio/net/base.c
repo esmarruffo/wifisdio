@@ -3,7 +3,6 @@
 
 #include "../wifi.h"
 #include "../wmi.h"
-#include "../utils.h"
 
 #include "arp.h"
 #include "ipv4.h"
@@ -32,8 +31,6 @@ void net_send_packet(uint16_t proto, net_address_t* target, uint8_t* data, uint1
         llc_snap_frame_t llc;
     } __attribute__((packed)) frame_t;
 
-    len = 84;
-
     frame_t* frame = net_malloc(sizeof(frame_t) + len);
     if(!frame)
         panic("net_send_packet(): Malloc failed\n");
@@ -43,14 +40,9 @@ void net_send_packet(uint16_t proto, net_address_t* target, uint8_t* data, uint1
     frame->llc.llc_snap[1] = 0xAA;
     frame->llc.llc_snap[2] = 0x3;
 
-    // frame->llc.protocol = htons(proto);
-    frame->llc.protocol = 0x0008;
+    frame->llc.protocol = htons(proto);
 
     memcpy(frame->llc.body, data, len);
 
-    memset(frame->llc.body, 0, len);
-    print_array_hex("frame: ", (uint8_t*)frame, sizeof(frame_t) + len);
-    print("len: %i\n", len);
-    print_array_hex("target->mac: ", target->mac, 6);
     sdio_tx_packet(target->mac, &frame->header, sizeof(frame_t) + len);
 }

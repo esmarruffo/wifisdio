@@ -26,7 +26,7 @@ ARCH	:=	-mthumb-interwork
 
 CFLAGS	:=	-g -Wall -Wextra -O2\
 		-mcpu=arm7tdmi -mtune=arm7tdmi -fomit-frame-pointer -fstrict-volatile-bitfields\
-		-ffast-math -DTWL=1 \
+		-ffast-math \
 		$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -DARM7

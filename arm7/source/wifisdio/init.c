@@ -277,11 +277,7 @@ void Wifi_Init_Core(void) {
 
         uint32_t wfc_offset = settings_offset * 8 - offsets[i];
 
-        // Initialize AP entry with zeros
-        memset(&access_points[i], 0, sizeof(WifiAp_t));
-        
-        // For all entries, read first 0x100 bytes
-        uint8_t data[0x200] = {0};
+        uint8_t data[0x100] = {0};
         readFirmware(wfc_offset, data, 0x100);
 
         if(swiCRC16(0x0, data, 0xFE + 2) != 0)
@@ -319,52 +315,39 @@ void Wifi_Init_Core(void) {
         uint32_t subnet_mask = 0xFFFFFFFF << (32 - data[0xD0]);
         access_points[i].subnet = htonl(subnet_mask);
 
-        // For entries 0-2 (original DS ones)
+        // TODO(thom_tl): WEP/WPA/WPA2
         if(i < 3) {
             access_points[i].flags |= (data[0xE6]) ? (sgWifiAp_FLAGS_WEP) : (0);
-            access_points[i].wpa_type = 0; // None/WEP
-        } 
-        // For entries 3-5 (DSi ones with WPA/WPA2 support)
-        else {
-            // Read the second page (0x100-0x1FF) which has WPA data
-            readFirmware(wfc_offset + 0x100, data + 0x100, 0x100);
-            
-            // Validate CRC for second page
-            if(swiCRC16(0x0, data + 0x100, 0xFE + 2) != 0) {
-                // If second page is invalid, treat as WEP/open
+        } else {
+            uint8_t type = 0;
+            readFirmware(wfc_offset + 0x181, &type, 1);
+
+            if(type == 0)
                 access_points[i].flags |= (data[0xE6]) ? (sgWifiAp_FLAGS_WEP) : (0);
-                access_points[i].wpa_type = 0;
-            } else {
-                // Read WPA type from offset 0x181
-                access_points[i].wpa_type = data[0x181];
-                
-                if(access_points[i].wpa_type == 0) {
-                    // None/WEP
-                    access_points[i].flags |= (data[0xE6]) ? (sgWifiAp_FLAGS_WEP) : (0);
-                } else {
-                    // WPA/WPA2
-                    access_points[i].flags |= sgWifiAp_FLAGS_WPA;
-                    
-                    // Copy the precomputed PSK
-                    memcpy(access_points[i].psk, data + 0x100, 0x20);
-                    
-                    print("Found WPA config type %d for SSID: %s\n", 
-                          access_points[i].wpa_type, 
-                          access_points[i].ssid);
-                }
-            }
+            else
+                access_points[i].flags |= sgWifiAp_FLAGS_WPA;
         }
+        
+        /*print("%.*s: ", access_points[i].ssid_len, access_points[i].ssid);
+        if(access_points[i].flags & sgWifiAp_FLAGS_WEP)
+            print("WEP\n");
+        else if(access_points[i].flags & sgWifiAp_FLAGS_WPA)
+            print("WPA\n");
+        else
+            print("None\n");*/
 
         access_points[i].enable = 0x80;
     }
 
+
     extern uint32_t boot_channel_wait;
+
     boot_channel_wait = 2;
 
     extern uint16_t requested_channel;
     extern uint8_t boot_channel_list[];
     requested_channel = boot_channel_list[0];
-    current_channel = requested_channel;
+    current_channel  = requested_channel;
 }
 
 void sdio_init(void) {
