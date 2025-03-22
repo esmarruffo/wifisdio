@@ -333,7 +333,7 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
                     extern bool ap_found;
                     extern uint8_t ap_index;
                     ap_found = true;
-                    ap_index = 4;
+                    ap_index = 3;   // HARDCODED
                     break;
 
                     wmi_bssinfo_event_t* info = (wmi_bssinfo_event_t*)params;
@@ -416,14 +416,6 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
                         }
 
                     }
-                    // CUT TO THE CHASE!!!
-                    extern bool ap_found;
-                    extern uint8_t ap_index;
-
-                    ap_found = true;
-                    ap_index = 4;
-                    break;
-
                     break;
                 }
                 case WMI_REGDOMAIN_EVENT: {
@@ -458,6 +450,10 @@ TWL_CODE void sdio_poll_mbox(uint8_t mbox) {
                         default:
                             print("Unknown WMIX Event 0x%x\n", wmix_event);
                     }
+                    break;
+                }
+                case WMI_ERROR_REPORT_EVENT: {
+                    print("WMI_ERROR_REPORT_EVENT\n");
                     break;
                 }
                 default: {
@@ -861,7 +857,7 @@ TWL_CODE void sdio_wmi_connect(void) {
 
     uint16_t channels[1] = {0};
     // TODO: fix channel setting to I don't have to hardcode it
-    current_channel = 4;
+    current_channel = 4;    // HARDCODED
     channels[0] = channel_to_mhz(current_channel);
 
     sdio_wmi_set_channel_params_cmd(0, 0, PHY_MODE_11G, 1, channels);

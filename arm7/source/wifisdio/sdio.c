@@ -2,6 +2,7 @@
 #include "sdio.h"
 
 #include "ndma.h"
+#include "utils.h"
 
 #include <stdio.h>
 #include <string.h>

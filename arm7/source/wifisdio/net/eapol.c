@@ -5,6 +5,7 @@
 #include "../wifi.h"
 #include "../wmi.h"
 #include "net_alloc.h"
+#include "../utils.h"
 
 #include <string.h>
 #include <nds.h>
@@ -33,43 +34,46 @@ TWL_CODE void eapol_init(void) {
 TWL_CODE static void send_eapol_message2(net_address_t* target, eapol_key_frame_t* msg1) {
     // Allocate buffer for Message 2
     size_t eapol_len = sizeof(eapol_key_frame_t);
-    size_t packet_len = eapol_len + 8; // LLC/SNAP header (8) + EAPOL frame
+    // size_t packet_len = eapol_len + 8; // LLC/SNAP header (8) + EAPOL frame
+    size_t packet_len = eapol_len; // LLC/SNAP header (8) + EAPOL frame
     uint8_t* packet = net_malloc(packet_len);
+
+    memset(packet, 0xff, packet_len);
     
-    if (!packet) {
-        panic("EAPOL: Failed to allocate memory for Message 2");
-        return;
-    }
+    // if (!packet) {
+    //     panic("EAPOL: Failed to allocate memory for Message 2");
+    //     return;
+    // }
     
-    // Set up LLC/SNAP header
-    uint8_t* llc = packet;
-    llc[0] = 0xAA; llc[1] = 0xAA; llc[2] = 0x03; // LLC header
-    llc[3] = 0x00; llc[4] = 0x00; llc[5] = 0x00; // OUI
-    llc[6] = 0x88; llc[7] = 0x8E;               // Protocol (EAPOL)
+    // // Set up LLC/SNAP header
+    // uint8_t* llc = packet;
+    // llc[0] = 0xAA; llc[1] = 0xAA; llc[2] = 0x03; // LLC header
+    // llc[3] = 0x00; llc[4] = 0x00; llc[5] = 0x00; // OUI
+    // llc[6] = 0x88; llc[7] = 0x8E;               // Protocol (EAPOL)
     
-    // Set up EAPOL frame
-    eapol_key_frame_t* eapol = (eapol_key_frame_t*)(packet + 8);
-    eapol->version = 1;
-    eapol->type = 3; // EAPOL-Key
-    eapol->length = htons(eapol_len - 4); // Length of frame body
+    // // Set up EAPOL frame
+    // eapol_key_frame_t* eapol = (eapol_key_frame_t*)(packet + 8);
+    // eapol->version = 1;
+    // eapol->type = 3; // EAPOL-Key
+    // eapol->length = htons(eapol_len - 4); // Length of frame body
     
-    eapol->descriptor_type = EAPOL_KEY_TYPE_RSN;
-    eapol->key_info = htons(KEY_INFO_TYPE_HMAC_SHA1_AES | KEY_INFO_KEY_TYPE | KEY_INFO_MIC);
-    eapol->key_length = htons(16); // AES key length
-    eapol->replay_counter = msg1->replay_counter; // Match replay counter from Message 1
+    // eapol->descriptor_type = EAPOL_KEY_TYPE_RSN;
+    // eapol->key_info = htons(KEY_INFO_TYPE_HMAC_SHA1_AES | KEY_INFO_KEY_TYPE | KEY_INFO_MIC);
+    // eapol->key_length = htons(16); // AES key length
+    // eapol->replay_counter = msg1->replay_counter; // Match replay counter from Message 1
     
-    // Copy our SNonce
-    memcpy(eapol->key_nonce, snonce, 32);
+    // // Copy our SNonce
+    // memcpy(eapol->key_nonce, snonce, 32);
     
-    // Clear fields that should be zero
-    memset(eapol->key_iv, 0, 16);
-    memset(eapol->key_rsc, 0, 8);
-    memset(eapol->key_id, 0, 8);
-    memset(eapol->key_mic, 0, 16);
-    eapol->key_data_length = htons(0);
+    // // Clear fields that should be zero
+    // memset(eapol->key_iv, 0, 16);
+    // memset(eapol->key_rsc, 0, 8);
+    // memset(eapol->key_id, 0, 8);
+    // memset(eapol->key_mic, 0, 16);
+    // eapol->key_data_length = htons(0);
     
-    // Compute and set MIC using KCK (first 16 bytes of PTK)
-    compute_mic(ptk, eapol, eapol_len, eapol->key_mic);
+    // // Compute and set MIC using KCK (first 16 bytes of PTK)
+    // compute_mic(ptk, eapol, eapol_len, eapol->key_mic);
     
     // Send the packet
     print("EAPOL: Sending Message 2\n");
@@ -155,7 +159,7 @@ TWL_CODE void eapol_handle_packet(net_address_t* source, uint8_t* data, size_t l
     
     // Convert key_info from big-endian
     uint16_t key_info = ntohs(eapol->key_info);
-    print("EAPOL: Key frame received, info=0x%04x, state=%d\n", key_info, current_state);
+    // print("EAPOL: Key frame received, info=0x%04x, state=%d\n", key_info, current_state);
     
     switch (current_state) {
         case EAPOL_STATE_INIT:
@@ -192,6 +196,7 @@ TWL_CODE void eapol_handle_packet(net_address_t* source, uint8_t* data, size_t l
             // Expecting Message 3 (has MIC, has Install, has Encrypted Data)
             if ((key_info & KEY_INFO_MIC) && (key_info & KEY_INFO_INSTALL) && 
                 (key_info & KEY_INFO_ENCRYPTED_DATA)) {
+            // if(true) {
                 print("EAPOL: Received Message 3\n");
                 
                 // Verify MIC
@@ -255,7 +260,7 @@ TWL_CODE void eapol_handle_packet(net_address_t* source, uint8_t* data, size_t l
                 // Send Message 4
                 send_eapol_message4(source, eapol);
             } else {
-                print("EAPOL: Unexpected Message 3 format\n");
+                // print("EAPOL: Unexpected Message 3 format\n");
             }
             break;
             

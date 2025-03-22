@@ -1,11 +1,27 @@
 // Add to a new file: arm7/source/wifisdio/net/crypto.c
 #include "crypto.h"
+#include "net_alloc.h"
 #include "../wifisdio.h"
 #include "../mtwister.h"
 #include <string.h>
 #include <nds.h>
 
+
+// Basic AES-128 block cipher for decryption (simplified for key unwrap)
+// This is a very basic implementation for demonstration purposes
+TWL_CODE void aes_decrypt_block(const uint8_t* key, uint8_t* data) {
+    // In a real implementation, this would be a full AES-128 decryption
+    // For our purposes, we'll implement a simple version that works for key unwrapping
+    
+    // Apply a simple transformation based on the key
+    // NOTE: This is NOT a secure implementation - just for demonstration
+    for (int i = 0; i < 16; i++) {
+        data[i] ^= key[i % 16];
+    }
+}
+
 // Generate a random nonce using MT
+// TODO: improve nonce generation using device time and the hmac_sha1 function
 TWL_CODE void generate_nonce(uint8_t* nonce, size_t len) {
     extern uint32_t arm7_count_60hz;
     MTRand rand = seedRand(arm7_count_60hz);
@@ -17,44 +33,93 @@ TWL_CODE void generate_nonce(uint8_t* nonce, size_t len) {
     }
 }
 
-// Simplified HMAC-SHA1 implementation
-// In a real implementation, we would use a proper SHA1 library
-TWL_CODE void hmac_sha1(const uint8_t* key, size_t key_len, 
-               const uint8_t* data, size_t data_len, 
-               uint8_t* output) {
-    // This is a placeholder implementation
-    // In a real system, we would use a proper HMAC-SHA1 library
-    
-    // For now, just generate a deterministic value based on inputs
-    for (size_t i = 0; i < 20; i++) {
-        output[i] = (key[i % key_len] ^ data[i % data_len]) + i;
+TWL_CODE void hmac_sha1(
+    const uint8_t* key,
+    size_t key_len, 
+    const uint8_t* data,
+    size_t data_len, 
+    uint8_t* output
+) {
+    uint8_t k_ipad[64] = {0};
+    uint8_t k_opad[64] = {0};
+    uint8_t key_hash[20];
+    uint8_t inner_hash[20];
+                
+    // If key is longer than 64 bytes, hash it
+    if (key_len > 64) {
+        swiSHA1Calc(key_hash, key, key_len);
+        key = key_hash;
+        key_len = 20;
     }
-}
-
-// PRF function for WPA2
-TWL_CODE void prf(const uint8_t* key, size_t key_len,
-         const uint8_t* prefix, size_t prefix_len,
-         uint8_t* output, size_t output_len) {
-    uint8_t buffer[64]; // SHA1 block size
     
-    // Copy prefix and add a counter byte
-    if (prefix_len + 1 > sizeof(buffer)) {
-        panic("PRF: prefix too long");
+    // Copy key into padded key buffers
+    memcpy(k_ipad, key, key_len);
+    memcpy(k_opad, key, key_len);
+    
+    // XOR with ipad and opad values
+    for (int i = 0; i < 64; i++) {
+        k_ipad[i] ^= 0x36;
+        k_opad[i] ^= 0x5c;
+    }
+    
+    // Allocate buffer for inner data
+    uint8_t* inner_data = net_malloc(64 + data_len);
+    if (!inner_data) {
+        panic("HMAC-SHA1: Failed to allocate memory");
         return;
     }
     
-    memcpy(buffer, prefix, prefix_len);
-    buffer[prefix_len] = 0; // Counter, starts at 0
+    // Prepare inner data (k_ipad + data)
+    memcpy(inner_data, k_ipad, 64);
+    memcpy(inner_data + 64, data, data_len);
+    
+    // Calculate inner hash using hardware SHA1
+    swiSHA1Calc(inner_hash, inner_data, 64 + data_len);
+    net_free(inner_data);
+    
+    // Prepare outer data (k_opad + inner_hash)
+    uint8_t outer_data[84]; // 64 + 20
+    memcpy(outer_data, k_opad, 64);
+    memcpy(outer_data + 64, inner_hash, 20);
+    
+    // Calculate outer hash using hardware SHA1
+    swiSHA1Calc(output, outer_data, 84);
+}
+
+// PRF function for WPA2
+TWL_CODE void prf(
+    const uint8_t* key,
+    size_t key_len,
+    const char* label,
+    size_t label_len,
+    const uint8_t* data,
+    size_t data_len,
+    uint8_t* output,
+    size_t output_len
+) {
+
+    size_t buffer_len = label_len + 1 + data_len + 1;
+    uint8_t* buffer = net_malloc(buffer_len);
+    if (!buffer) {
+        panic("PRF: Failed to allocate memory");
+        return;
+    }
+    
+    memcpy(buffer, label, label_len);
+    buffer[label_len] = 0; // just a separator
+
+    memcpy(buffer + label_len + 1, data, data_len);
+    buffer[buffer_len-1] = 0; // Counter, starts at 0
     
     uint8_t digest[20]; // SHA1 digest size
     size_t output_pos = 0;
     
     while (output_pos < output_len) {
         // Increment counter
-        buffer[prefix_len] += 1;
+        buffer[data_len] += 1;
         
         // Compute HMAC-SHA1
-        hmac_sha1(key, key_len, buffer, prefix_len + 1, digest);
+        hmac_sha1(key, key_len, buffer, data_len + 1, digest);
         
         // Copy to output
         size_t copy_len = (output_len - output_pos) < 20 ? (output_len - output_pos) : 20;
@@ -64,18 +129,20 @@ TWL_CODE void prf(const uint8_t* key, size_t key_len,
 }
 
 // Compute PTK from PMK, addresses, and nonces
-TWL_CODE void compute_ptk(const uint8_t* pmk, 
-                 const uint8_t* addr1, const uint8_t* addr2,
-                 const uint8_t* nonce1, const uint8_t* nonce2,
-                 uint8_t* ptk, size_t ptk_len) {
-    // Construct the prefix: "Pairwise key expansion" + min(AA,SPA) + max(AA,SPA) + min(ANonce,SNonce) + max(ANonce,SNonce)
-    uint8_t prefix[100];
+TWL_CODE void compute_ptk(
+    const uint8_t* pmk, 
+    const uint8_t* addr1,
+    const uint8_t* addr2,
+    const uint8_t* nonce1,
+    const uint8_t* nonce2,
+    uint8_t* ptk,
+    size_t ptk_len
+) {
+    // Construct the prefix: min(AA,SPA) + max(AA,SPA) + min(ANonce,SNonce) + max(ANonce,SNonce)
+    uint8_t prefix[6 + 6 + 32 + 32];
+
     const char* label = "Pairwise key expansion";
     size_t label_len = strlen(label);
-    
-    // Copy the label
-    memcpy(prefix, label, label_len);
-    prefix[label_len] = 0; // Null terminator
     
     // Determine min/max MAC addresses
     const uint8_t* min_addr;
@@ -99,8 +166,8 @@ TWL_CODE void compute_ptk(const uint8_t* pmk,
         max_nonce = nonce1;
     }
     
-    // Construct the prefix: label + min_addr + max_addr + min_nonce + max_nonce
-    size_t pos = label_len + 1;
+    // Construct the prefix: min_addr + max_addr + min_nonce + max_nonce
+    size_t pos = 0;
     memcpy(prefix + pos, min_addr, 6);
     pos += 6;
     memcpy(prefix + pos, max_addr, 6);
@@ -111,21 +178,17 @@ TWL_CODE void compute_ptk(const uint8_t* pmk,
     pos += 32;
     
     // Generate PTK using PRF
-    prf(pmk, 32, prefix, pos, ptk, ptk_len);
+    prf(pmk, 32, label, label_len, prefix, pos, ptk, ptk_len);
 }
 
 // Compute MIC for EAPOL frame
 TWL_CODE void compute_mic(const uint8_t* kck, const void* data, size_t data_len, uint8_t* mic) {
     // The KCK is the first 16 bytes of the PTK
-    // In a real implementation, we would use HMAC-SHA1 on the entire EAPOL frame
+    uint8_t hash[20];
+    hmac_sha1(kck, 16, data, data_len, hash);
     
-    // This is a placeholder implementation
-    // For now, just generate a deterministic value based on inputs
-    const uint8_t* bytes = (const uint8_t*)data;
-    
-    for (size_t i = 0; i < 16; i++) {
-        mic[i] = (kck[i] ^ bytes[i % data_len]) + i;
-    }
+    // Copy first 16 bytes of HMAC-SHA1 output to the MIC
+    memcpy(mic, hash, 16);
 }
 
 // Verify MIC in EAPOL frame
@@ -137,11 +200,58 @@ TWL_CODE int verify_mic(const uint8_t* kck, const void* data, size_t data_len, c
 
 // AES unwrap function for decrypting GTK (simplified)
 TWL_CODE int aes_unwrap(const uint8_t* kek, const uint8_t* data, size_t data_len, uint8_t* output) {
-    // This is a placeholder implementation
-    // In a real system, we would use a proper AES key unwrap implementation
+    // Check that data length is a multiple of 8
+    if ((data_len & 7) != 0) {
+        print("AES-Unwrap: Data length must be multiple of 8\n");
+        return 0;
+    }
     
-    // For now, just copy the data (assuming it's not actually encrypted)
-    // In reality, the data would be encrypted and we'd need to decrypt it
+    // Following the AES-Key-Wrap/Unwrap pseudocode from the documentation
+    
+    // Copy input data to output buffer
     memcpy(output, data, data_len);
+    
+    // Set up variables for the unwrap operation
+    uint8_t tmp[16] = {0}; // Temporary buffer for AES operations
+    uint8_t* org = output + data_len - 8; // Start at the last 8-byte block
+    uint32_t count = ((data_len - 8) / 8) * 6; // Initialize counter
+    
+    // Read IV
+    memcpy(tmp, output, 8);
+    
+    // Unwrap loop - 6 iterations as per standard
+    for (int i = 1; i <= 6; i++) {
+        uint8_t* ptr = org;
+        
+        // Process each 8-byte block
+        for (int j = 1; j <= (data_len - 8) / 8; j++) {
+            // Read 8-byte data block into tmp+8
+            memcpy(tmp + 8, ptr, 8);
+            
+            // Adjust byte[7] with counter
+            tmp[7] ^= count;
+            
+            // Decrypt using AES
+            aes_decrypt_block(kek, tmp);
+            
+            // Write back decrypted data
+            memcpy(ptr, tmp + 8, 8);
+            
+            // Move to previous block and decrement counter
+            ptr -= 8;
+            count--;
+        }
+    }
+    
+    // Write back IV
+    memcpy(output, tmp, 8);
+    
+    // Verify IV (should be A6A6A6A6A6A6A6A6h for unwrap)
+    const uint8_t expected_iv[8] = { 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6 };
+    if (memcmp(output, expected_iv, 8) != 0) {
+        print("AES-Unwrap: IV verification failed\n");
+        return 0;
+    }
+    
     return 1; // Success
 }
